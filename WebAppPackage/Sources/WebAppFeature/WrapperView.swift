@@ -10,9 +10,11 @@ import WebAppEngine
 /// The main view for the WebApp Wrapper - displays the wrapped website.
 ///
 /// This view provides:
-/// - Tab bar with tab management
+/// - Tab bar with tab management and context menus
 /// - WebKit-based web content display
+/// - Loading progress indicator
 /// - Optional navigation controls
+/// - Keyboard shortcuts for tab management
 public struct WrapperView: View {
 
     // MARK: - Properties
@@ -22,6 +24,9 @@ public struct WrapperView: View {
 
     /// The tab manager for this window.
     @State private var tabManager: TabManager
+
+    /// Stack of recently closed tab URLs for "reopen closed tab" feature.
+    @State private var recentlyClosedTabs: [URL] = []
 
     // MARK: - Initialization
 
@@ -38,7 +43,17 @@ public struct WrapperView: View {
     public var body: some View {
         VStack(spacing: 0) {
             // Tab Bar
-            TabBarView(tabManager: tabManager)
+            TabBarView(
+                tabManager: tabManager,
+                onCloseTab: { tab in closeTab(tab) },
+                onReopenTab: reopenClosedTab,
+                canReopenTab: !recentlyClosedTabs.isEmpty
+            )
+
+            // Loading Progress Bar
+            if let activeTab = tabManager.activeTab, activeTab.isLoading {
+                LoadingProgressBar(progress: activeTab.loadingProgress)
+            }
 
             // Navigation Bar (if enabled)
             if configuration.showNavigationBar, let activeTab = tabManager.activeTab {
@@ -53,6 +68,7 @@ public struct WrapperView: View {
             }
         }
         .frame(minWidth: 800, minHeight: 600)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     // MARK: - Empty State
@@ -67,101 +83,249 @@ public struct WrapperView: View {
                 .font(.title2)
                 .foregroundStyle(.secondary)
 
-            Button("New Tab") {
-                tabManager.createTab()
+            HStack(spacing: 12) {
+                Button("New Tab") {
+                    tabManager.createTab()
+                }
+                .buttonStyle(.borderedProminent)
+
+                if !recentlyClosedTabs.isEmpty {
+                    Button("Reopen Closed Tab") {
+                        reopenClosedTab()
+                    }
+                    .buttonStyle(.bordered)
+                }
             }
-            .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    // MARK: - Tab Actions
+
+    private func closeTab(_ tab: WebTab) {
+        // Save URL for reopening
+        if let url = tab.url {
+            recentlyClosedTabs.append(url)
+            // Keep only last 10 closed tabs
+            if recentlyClosedTabs.count > 10 {
+                recentlyClosedTabs.removeFirst()
+            }
+        }
+        tabManager.closeTab(tab)
+    }
+
+    private func reopenClosedTab() {
+        guard let url = recentlyClosedTabs.popLast() else { return }
+        tabManager.createTab(with: url)
+    }
+}
+
+// MARK: - Loading Progress Bar
+
+/// A thin progress bar shown below the tab bar during page loads.
+struct LoadingProgressBar: View {
+    let progress: Double
+
+    var body: some View {
+        GeometryReader { geometry in
+            Rectangle()
+                .fill(Color.accentColor)
+                .frame(width: geometry.size.width * progress)
+                .animation(.linear(duration: 0.1), value: progress)
+        }
+        .frame(height: 2)
+        .background(Color(nsColor: .separatorColor))
     }
 }
 
 // MARK: - Tab Bar View
 
-/// The tab bar showing all open tabs.
+/// The tab bar showing all open tabs with context menu support.
 struct TabBarView: View {
     @Bindable var tabManager: TabManager
+    let onCloseTab: (WebTab) -> Void
+    let onReopenTab: () -> Void
+    let canReopenTab: Bool
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 0) {
-                ForEach(tabManager.tabs) { tab in
-                    TabItemView(
-                        tab: tab,
-                        isActive: tabManager.activeTab == tab,
-                        onSelect: { tabManager.activeTab = tab },
-                        onClose: { tabManager.closeTab(tab) }
-                    )
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 1) {
+                    ForEach(tabManager.tabs) { tab in
+                        TabItemView(
+                            tab: tab,
+                            isActive: tabManager.activeTab == tab,
+                            isOnlyTab: tabManager.tabs.count == 1,
+                            onSelect: { tabManager.activeTab = tab },
+                            onClose: { onCloseTab(tab) }
+                        )
+                        .contextMenu {
+                            tabContextMenu(for: tab)
+                        }
+                    }
                 }
-
-                // New Tab Button
-                Button {
-                    tabManager.createTab()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .medium))
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 4)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
             }
-            .padding(.horizontal, 8)
+
+            Divider()
+                .frame(height: 20)
+
+            // New Tab Button
+            Button {
+                tabManager.createTab()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("New Tab (⌘T)")
+            .padding(.horizontal, 4)
         }
         .frame(height: 36)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func tabContextMenu(for tab: WebTab) -> some View {
+        Button("New Tab") {
+            tabManager.createTab()
+        }
+
+        Button("Duplicate Tab") {
+            tabManager.duplicateTab(tab)
+        }
+
+        Divider()
+
+        if canReopenTab {
+            Button("Reopen Closed Tab") {
+                onReopenTab()
+            }
+        }
+
+        Divider()
+
+        Button("Reload") {
+            tab.reload()
+        }
+
+        Divider()
+
+        Button("Close Tab") {
+            onCloseTab(tab)
+        }
+        .disabled(tabManager.tabs.count == 1)
+
+        Button("Close Other Tabs") {
+            // Close all except this one
+            for otherTab in tabManager.tabs where otherTab != tab {
+                onCloseTab(otherTab)
+            }
+        }
+        .disabled(tabManager.tabs.count <= 1)
+
+        Button("Close Tabs to the Right") {
+            if let index = tabManager.tabs.firstIndex(of: tab) {
+                let tabsToClose = Array(tabManager.tabs.suffix(from: index + 1))
+                for tabToClose in tabsToClose {
+                    onCloseTab(tabToClose)
+                }
+            }
+        }
+        .disabled(tabManager.tabs.last == tab)
     }
 }
 
 // MARK: - Tab Item View
 
-/// A single tab in the tab bar.
+/// A single tab in the tab bar with improved styling.
 struct TabItemView: View {
     let tab: WebTab
     let isActive: Bool
+    let isOnlyTab: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
 
     @State private var isHovering: Bool = false
 
+    private var backgroundColor: Color {
+        if isActive {
+            return Color(nsColor: .controlBackgroundColor)
+        } else if isHovering {
+            return Color(nsColor: .controlBackgroundColor).opacity(0.5)
+        } else {
+            return Color.clear
+        }
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             // Loading indicator or favicon
-            if tab.isLoading {
-                ProgressView()
-                    .scaleEffect(0.5)
-                    .frame(width: 16, height: 16)
-            } else {
-                Image(systemName: "globe")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+            ZStack {
+                if tab.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.4)
+                } else {
+                    Image(systemName: "globe")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
             }
+            .frame(width: 14, height: 14)
 
             // Title
-            Text(tab.title.isEmpty ? "New Tab" : tab.title)
-                .font(.system(size: 12))
+            Text(displayTitle)
+                .font(.system(size: 11))
                 .lineLimit(1)
-                .frame(maxWidth: 150, alignment: .leading)
+                .frame(maxWidth: 140, alignment: .leading)
+                .foregroundStyle(isActive ? .primary : .secondary)
 
-            // Close button
-            Button {
-                onClose()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
+            // Close button (hidden for single tab)
+            if !isOnlyTab {
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14, height: 14)
+                        .background(
+                            Circle()
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                                .opacity(isHovering ? 1 : 0)
+                        )
+                }
+                .buttonStyle(.plain)
+                .opacity(isHovering || isActive ? 1 : 0)
             }
-            .buttonStyle(.plain)
-            .opacity(isHovering ? 1 : 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
         .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isActive ? Color(nsColor: .controlBackgroundColor) : Color.clear)
+            RoundedRectangle(cornerRadius: 5)
+                .fill(backgroundColor)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(Color(nsColor: .separatorColor).opacity(isActive ? 0.5 : 0), lineWidth: 0.5)
         )
         .onHover { isHovering = $0 }
         .onTapGesture { onSelect() }
+    }
+
+    private var displayTitle: String {
+        if tab.title.isEmpty {
+            if let host = tab.url?.host {
+                return host
+            }
+            return "New Tab"
+        }
+        return tab.title
     }
 }
 
@@ -172,61 +336,90 @@ struct NavigationBarView: View {
     let tab: WebTab
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Back
-            Button {
-                tab.goBack()
-            } label: {
-                Image(systemName: "chevron.left")
-            }
-            .disabled(!tab.canGoBack)
+        HStack(spacing: 8) {
+            // Navigation buttons
+            HStack(spacing: 4) {
+                NavigationButton(
+                    systemName: "chevron.left",
+                    action: { tab.goBack() },
+                    isEnabled: tab.canGoBack,
+                    help: "Back (⌘[)"
+                )
 
-            // Forward
-            Button {
-                tab.goForward()
-            } label: {
-                Image(systemName: "chevron.right")
-            }
-            .disabled(!tab.canGoForward)
+                NavigationButton(
+                    systemName: "chevron.right",
+                    action: { tab.goForward() },
+                    isEnabled: tab.canGoForward,
+                    help: "Forward (⌘])"
+                )
 
-            // Reload
-            Button {
-                if tab.isLoading {
-                    tab.stopLoading()
-                } else {
-                    tab.reload()
-                }
-            } label: {
-                Image(systemName: tab.isLoading ? "xmark" : "arrow.clockwise")
+                NavigationButton(
+                    systemName: tab.isLoading ? "xmark" : "arrow.clockwise",
+                    action: {
+                        if tab.isLoading {
+                            tab.stopLoading()
+                        } else {
+                            tab.reload()
+                        }
+                    },
+                    isEnabled: true,
+                    help: tab.isLoading ? "Stop" : "Reload (⌘R)"
+                )
             }
 
             // URL display
-            HStack {
-                Image(systemName: "lock.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                if let url = tab.url, url.scheme == "https" {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.green)
+                }
 
                 Text(tab.url?.host ?? "")
-                    .font(.system(size: 13))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.primary)
                     .lineLimit(1)
+
+                Spacer()
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity)
             .background(Color(nsColor: .textBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 6))
 
-            // Home
-            Button {
-                tab.goHome()
-            } label: {
-                Image(systemName: "house")
-            }
+            // Home button
+            NavigationButton(
+                systemName: "house",
+                action: { tab.goHome() },
+                isEnabled: true,
+                help: "Home (⌘⇧H)"
+            )
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+}
+
+/// A styled navigation button.
+struct NavigationButton: View {
+    let systemName: String
+    let action: () -> Void
+    let isEnabled: Bool
+    let help: String
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isEnabled ? .primary : .tertiary)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .disabled(!isEnabled)
+        .help(help)
     }
 }
 
@@ -237,7 +430,10 @@ struct WebViewContainer: NSViewRepresentable {
     let tab: WebTab
 
     func makeNSView(context: Context) -> WKWebView {
-        tab.webView
+        let webView = tab.webView
+        // Ensure the web view fills the container
+        webView.autoresizingMask = [.width, .height]
+        return webView
     }
 
     func updateNSView(_ nsView: WKWebView, context: Context) {
@@ -247,9 +443,17 @@ struct WebViewContainer: NSViewRepresentable {
 
 // MARK: - Preview
 
-#Preview {
+#Preview("Wrapper View") {
     WrapperView(configuration: WebAppConfiguration(
         name: "Example",
         homeURL: URL(string: "https://apple.com")!
+    ))
+}
+
+#Preview("Wrapper with Nav Bar") {
+    WrapperView(configuration: WebAppConfiguration(
+        name: "Example",
+        homeURL: URL(string: "https://apple.com")!,
+        showNavigationBar: true
     ))
 }
