@@ -69,6 +69,41 @@ public struct WrapperView: View {
         }
         .frame(minWidth: 800, minHeight: 600)
         .background(Color(nsColor: .windowBackgroundColor))
+        // Menu command handlers
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.newTab"))) { _ in
+            tabManager.createTab()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.closeTab"))) { _ in
+            if let activeTab = tabManager.activeTab {
+                closeTab(activeTab)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.reopenClosedTab"))) { _ in
+            reopenClosedTab()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.nextTab"))) { _ in
+            tabManager.selectNextTab()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.previousTab"))) { _ in
+            tabManager.selectPreviousTab()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.selectTab"))) { notification in
+            if let number = notification.userInfo?["number"] as? Int {
+                tabManager.selectTab(number: number)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.navigateBack"))) { _ in
+            tabManager.activeTab?.goBack()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.navigateForward"))) { _ in
+            tabManager.activeTab?.goForward()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.reloadPage"))) { _ in
+            tabManager.activeTab?.reload()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .init("com.xpycode.webapp.goHome"))) { _ in
+            tabManager.activeTab?.goHome()
+        }
     }
 
     // MARK: - Empty State
