@@ -3,6 +3,7 @@
 // Copyright © 2024 Xpycode. All rights reserved.
 
 import SwiftUI
+import WebKit
 import WebAppCore
 
 /// Settings view for the WebApp application.
@@ -15,6 +16,10 @@ public struct SettingsView: View {
     @AppStorage("defaultUserAgent") private var defaultUserAgent: String = "desktop"
     @AppStorage("blockPopups") private var blockPopups: Bool = false
     @AppStorage("enableNotifications") private var enableNotifications: Bool = true
+
+    @State private var showingClearBrowsingDataAlert = false
+    @State private var showingClearCookiesAlert = false
+    @State private var clearInProgress = false
 
     // MARK: - Body
 
@@ -70,11 +75,23 @@ public struct SettingsView: View {
         Form {
             Section {
                 Button("Clear Browsing Data...") {
-                    // TODO: Implement clear browsing data
+                    showingClearBrowsingDataAlert = true
                 }
+                .disabled(clearInProgress)
 
                 Button("Clear Cookies...") {
-                    // TODO: Implement clear cookies
+                    showingClearCookiesAlert = true
+                }
+                .disabled(clearInProgress)
+
+                if clearInProgress {
+                    HStack {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                        Text("Clearing...")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } header: {
                 Text("Privacy")
@@ -90,6 +107,62 @@ public struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+        .alert("Clear Browsing Data", isPresented: $showingClearBrowsingDataAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) {
+                clearBrowsingData()
+            }
+        } message: {
+            Text("This will clear all browsing history, cached images and files, and other browsing data. This action cannot be undone.")
+        }
+        .alert("Clear Cookies", isPresented: $showingClearCookiesAlert) {
+            Button("Cancel", role: .cancel) {}
+            Button("Clear", role: .destructive) {
+                clearCookies()
+            }
+        } message: {
+            Text("This will clear all cookies and website data. You will be signed out of all websites. This action cannot be undone.")
+        }
+    }
+
+    // MARK: - Data Clearing Actions
+
+    private func clearBrowsingData() {
+        clearInProgress = true
+        let dataStore = WKWebsiteDataStore.default()
+        let dataTypes: Set<String> = [
+            WKWebsiteDataTypeDiskCache,
+            WKWebsiteDataTypeMemoryCache,
+            WKWebsiteDataTypeOfflineWebApplicationCache,
+            WKWebsiteDataTypeLocalStorage,
+            WKWebsiteDataTypeSessionStorage,
+            WKWebsiteDataTypeIndexedDBDatabases,
+            WKWebsiteDataTypeWebSQLDatabases
+        ]
+
+        dataStore.fetchDataRecords(ofTypes: dataTypes) { records in
+            dataStore.removeData(ofTypes: dataTypes, for: records) {
+                Task { @MainActor in
+                    clearInProgress = false
+                }
+            }
+        }
+    }
+
+    private func clearCookies() {
+        clearInProgress = true
+        let dataStore = WKWebsiteDataStore.default()
+        let dataTypes: Set<String> = [
+            WKWebsiteDataTypeCookies
+        ]
+
+        dataStore.fetchDataRecords(ofTypes: dataTypes) { records in
+            dataStore.removeData(ofTypes: dataTypes, for: records) {
+                Task { @MainActor in
+                    clearInProgress = false
+                }
+            }
+        }
     }
 
     // MARK: - About View
