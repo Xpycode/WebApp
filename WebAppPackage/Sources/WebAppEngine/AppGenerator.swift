@@ -73,6 +73,9 @@ public final class AppGenerator {
 
         // Generate and set the app icon
         try generateAppIcon(for: configuration, at: destination)
+
+        // Ad-hoc sign the app so macOS doesn't block it
+        try signApp(at: destination)
     }
 
     // MARK: - Private Methods
@@ -128,6 +131,27 @@ public final class AppGenerator {
         let provisioningURL = appURL.appendingPathComponent("Contents/embedded.provisionprofile")
         if fileManager.fileExists(atPath: provisioningURL.path) {
             try fileManager.removeItem(at: provisioningURL)
+        }
+    }
+
+    /// Signs the app with an ad-hoc signature so macOS doesn't block it.
+    private func signApp(at appURL: URL) throws {
+        // First clear quarantine attributes
+        let xattrProcess = Process()
+        xattrProcess.executableURL = URL(fileURLWithPath: "/usr/bin/xattr")
+        xattrProcess.arguments = ["-cr", appURL.path]
+        try xattrProcess.run()
+        xattrProcess.waitUntilExit()
+
+        // Then ad-hoc sign the app
+        let codesignProcess = Process()
+        codesignProcess.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        codesignProcess.arguments = ["--force", "--deep", "--sign", "-", appURL.path]
+        try codesignProcess.run()
+        codesignProcess.waitUntilExit()
+
+        if codesignProcess.terminationStatus != 0 {
+            throw AppGeneratorError.codeSigningFailed
         }
     }
 
@@ -322,6 +346,7 @@ public enum AppGeneratorError: LocalizedError {
     case infoPlistReadFailed
     case configurationWriteFailed
     case iconGenerationFailed
+    case codeSigningFailed
 
     public var errorDescription: String? {
         switch self {
@@ -333,6 +358,8 @@ public enum AppGeneratorError: LocalizedError {
             return "Failed to write the configuration file."
         case .iconGenerationFailed:
             return "Failed to generate the app icon."
+        case .codeSigningFailed:
+            return "Failed to sign the generated app. The app may not open correctly."
         }
     }
 }
