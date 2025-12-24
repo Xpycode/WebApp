@@ -56,7 +56,7 @@ public final class TabManager {
         self.configuration = configuration
 
         if createInitialTab {
-            let tab = WebTab(configuration: configuration)
+            let tab = WebTab(configuration: configuration, tabManager: self)
             tabs.append(tab)
             activeTab = tab
         }
@@ -72,7 +72,7 @@ public final class TabManager {
     /// - Returns: The newly created tab.
     @discardableResult
     public func createTab(with url: URL? = nil, inBackground: Bool = false) -> WebTab {
-        let tab = WebTab(configuration: configuration, initialURL: url)
+        let tab = WebTab(configuration: configuration, initialURL: url, tabManager: self)
         tabs.append(tab)
 
         if !inBackground || activeTab == nil {
@@ -90,7 +90,7 @@ public final class TabManager {
     /// - Returns: The newly created tab.
     @discardableResult
     public func createTabAfterActive(with url: URL? = nil, inBackground: Bool = false) -> WebTab {
-        let tab = WebTab(configuration: configuration, initialURL: url)
+        let tab = WebTab(configuration: configuration, initialURL: url, tabManager: self)
 
         if let activeIndex = activeTabIndex {
             tabs.insert(tab, at: activeIndex + 1)
