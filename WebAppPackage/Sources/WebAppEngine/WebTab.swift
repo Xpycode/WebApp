@@ -50,6 +50,9 @@ public final class WebTab: Identifiable, Hashable {
     /// Creation timestamp.
     public let createdAt: Date
 
+    /// The coordinator handling WebKit delegates.
+    public private(set) var coordinator: WebViewCoordinator?
+
     // MARK: - Private Properties
 
     private var observations: [NSKeyValueObservation] = []
@@ -61,7 +64,8 @@ public final class WebTab: Identifiable, Hashable {
     /// - Parameters:
     ///   - configuration: The web app configuration.
     ///   - initialURL: Optional initial URL to load. Defaults to config's home URL.
-    public init(configuration: WebAppConfiguration, initialURL: URL? = nil) {
+    ///   - tabManager: Optional tab manager for handling new tab creation.
+    public init(configuration: WebAppConfiguration, initialURL: URL? = nil, tabManager: TabManager? = nil) {
         self.id = UUID()
         self.configuration = configuration
         self.createdAt = Date()
@@ -78,6 +82,9 @@ public final class WebTab: Identifiable, Hashable {
         // Enable media capture if allowed
         webConfig.mediaTypesRequiringUserActionForPlayback = []
 
+        // Enable link preview
+        webConfig.preferences.isElementFullscreenEnabled = true
+
         // Create the web view
         self.webView = WKWebView(frame: .zero, configuration: webConfig)
 
@@ -86,12 +93,30 @@ public final class WebTab: Identifiable, Hashable {
             webView.customUserAgent = userAgentString
         }
 
+        // Allow magnification (zoom)
+        webView.allowsMagnification = true
+
+        // Set up the coordinator for delegate handling
+        let coord = WebViewCoordinator(configuration: configuration, tab: self, tabManager: tabManager)
+        self.coordinator = coord
+        webView.navigationDelegate = coord
+        webView.uiDelegate = coord
+
         // Set up observations
         setupObservations()
 
         // Load initial URL
         let urlToLoad = initialURL ?? configuration.homeURL
         webView.load(URLRequest(url: urlToLoad))
+    }
+
+    // MARK: - Coordinator Setup
+
+    /// Updates the tab manager reference in the coordinator.
+    ///
+    /// - Parameter tabManager: The tab manager to use.
+    public func setTabManager(_ tabManager: TabManager) {
+        coordinator?.tabManager = tabManager
     }
 
     // Note: observations are automatically invalidated when the WebTab is deallocated
