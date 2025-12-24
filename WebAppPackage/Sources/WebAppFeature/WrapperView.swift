@@ -460,18 +460,18 @@ struct NavigationButton: View {
 
 // MARK: - WebView Container
 
-/// Container for the WKWebView.
+/// Container for the TabWebView (custom WKWebView with context menu support).
 struct WebViewContainer: NSViewRepresentable {
     let tab: WebTab
 
-    func makeNSView(context: Context) -> WKWebView {
+    func makeNSView(context: Context) -> TabWebView {
         let webView = tab.webView
         // Ensure the web view fills the container
         webView.autoresizingMask = [.width, .height]
         return webView
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {
+    func updateNSView(_ nsView: TabWebView, context: Context) {
         // View updates are handled by the tab's observations
     }
 }

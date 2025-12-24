@@ -24,7 +24,7 @@ public final class WebTab: Identifiable, Hashable {
     public let configuration: WebAppConfiguration
 
     /// The underlying web view.
-    public private(set) var webView: WKWebView
+    public private(set) var webView: TabWebView
 
     /// Current page title.
     public private(set) var title: String = ""
@@ -86,7 +86,7 @@ public final class WebTab: Identifiable, Hashable {
         webConfig.preferences.isElementFullscreenEnabled = true
 
         // Create the web view
-        self.webView = WKWebView(frame: .zero, configuration: webConfig)
+        self.webView = TabWebView(frame: .zero, configuration: webConfig)
 
         // Set up user agent if needed
         if let userAgentString = configuration.userAgent.userAgentString() {
@@ -101,6 +101,11 @@ public final class WebTab: Identifiable, Hashable {
         self.coordinator = coord
         webView.navigationDelegate = coord
         webView.uiDelegate = coord
+
+        // Wire up context menu "Open in New Tab" callback
+        webView.onOpenInNewTab = { [weak tabManager] url, inBackground in
+            tabManager?.createTab(with: url, inBackground: inBackground)
+        }
 
         // Set up observations
         setupObservations()
